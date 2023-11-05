@@ -1,3 +1,5 @@
+import re
+
 class Node:
     def __init__(self, tag=None):
         self.parent = None
@@ -56,68 +58,73 @@ class Node:
 class WebOQLTree:
     def __init__(self, source:str):
         self.source = source
+        self.formated_source = self.format_file()
+
         self.root:Node = None
         self.stack = []
 
         self.filter_out = ["!DOCTYPE", "meta"]
 
+
+    '''
+    Removes all the attributes from the html file before parsing 
+    '''
+    def remove_attributes(self):
+        tag_with_attributes = re.compile(r'<([a-zA-Z]+)(?:\s+[^>]+)>')
+        cleaned_html = re.sub(tag_with_attributes, r'<\1>', self.source)
+        return cleaned_html
+
+
     '''
     Format the html file into a single line removing unnecessary white spaces
     '''
     def format_file(self):
-        self.source = self.source.replace('\n', '').replace('\r', '')
+        parsed_contents = self.remove_attributes()
+        parsed_contents = parsed_contents.replace('\n', '').replace('\r', '')
+        return parsed_contents
 
 
     '''
     Filters tag outs and creates the root node if it encounters an "html" tag
     '''
-    def filter_tags(self,tag, starting_index, closing_index):
+    def validate_tag(self,tag) -> bool:
         result_found = any(word in tag for word in self.filter_out)
         if not result_found:
-            node = Node()
-            stack_index = self.check_tag_in_stack(tag[2:])
-            if "<html" in tag:
-                self.root = Node(tag)
-                self.root.set_open_bracket_index(starting_index, closing_index)
-                self.stack.append(self.root)
-            elif "</html" in tag:
-                self.root.set_closing_bracket_index(starting_index, closing_index)
-                self.get_tags_source(self.root)
-            else:
-                #Push the tag 
-                if "<" in tag and "</" not in tag:
-                    node.set_tag(tag)
-                    node.set_open_bracket_index(starting_index, closing_index)
-                    self.stack.append(node)
-                if "</" in tag and stack_index != -1 :
-                    self.stack[stack_index].set_closing_bracket_index(starting_index, closing_index)
-                    self.get_tags_source(self.stack[stack_index])
-                    self.get_tags_text(self.stack[stack_index])
-    
-
-    '''
-    Checks to see if a substring (tag) is in the stack.
-    If it is it returns the Index. If not it returns false
-
-    Something needs to be fixed in this though
-    '''
-    def check_tag_in_stack(self, substring):
-        for index, node in enumerate(self.stack):    
-            if hasattr(node, 'tag') and substring in node.tag:
-                return index
-        return -1
+            return True
+        else: 
+            return False
     
 
     def get_tag_node(self):
-        starting_index = None
-        for index, char in enumerate(self.source):
-            if char == "<":
-                starting_index = index
-            elif char == ">":
-                if starting_index is not None:
-                    tag = self.source[starting_index:index+1]
-                    self.filter_tags(tag, starting_index, index)
-                    starting_index = None
+        opening_tags = []
+        index = 0
+        while index < len(self.formated_source):
+            if self.formated_source[index] == "<":
+                closing_index = self.formated_source.find(">", index)
+                if closing_index != -1:
+                    tag = self.formated_source[index:closing_index + 1] #Gets the tag
+                    if self.validate_tag(tag) == False:
+                        index += 1
+                        continue
+                    if tag.startswith("</") and opening_tags:
+                        # It's a closing tag, check if it matches the last opening tag
+                        last_opening_tag = opening_tags.pop()
+                        last_opening_tag.set_closing_bracket_index(index, closing_index)
+                        if tag[2:-1] != last_opening_tag.tag:
+                            print("Error: Mismatched tags - <{}> and </{}>".format(last_opening_tag, last_opening_tag))
+                    else:
+                        # It's an opening tag, add it to the list of opening tags
+                        node = Node(tag[1:-1])
+                        node.set_open_bracket_index(index, closing_index)
+                        self.stack.append(node)
+                        opening_tags.append(node)
+                    index = closing_index + 1
+                else:
+                    # Invalid tag, move to the next character
+                    index += 1
+            else:
+                # Move to the next character if not a tag
+                index += 1
 
 
     '''
